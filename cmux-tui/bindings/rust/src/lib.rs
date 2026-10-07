@@ -48,7 +48,9 @@ pub mod raw;
 mod raw_support;
 mod resource;
 mod socket_hash;
-#[cfg(test)]
+// Only the socket-path-hash tests use it (the --no-default-features build
+// would hold it unused and fail -D warnings).
+#[cfg(all(test, feature = "socket-path-hash"))]
 mod test_roots;
 mod topology;
 
