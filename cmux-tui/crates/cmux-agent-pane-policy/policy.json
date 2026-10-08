@@ -75,10 +75,11 @@
   "path_keys": ["cwd", "path", "additionalDirectories", "directory", "directories", "workingDirectory",
     "folder", "folders", "root", "roots", "worktree", "worktreePath"],
   "question_answers": {
-    "description": "Crate rule, stricter than the Swift host today (the coordinator's security decision 2026-10-07; Swift half filed to the ask-gallery lane): answers only for a pending question (toolCall._meta.acpmux.question), as an object of at most 64 item ids, each a string, a list of strings, or the Codex form {\"answers\": [strings]} (one key only), of at most 4096 UTF-8 bytes (a list counted together); each item id at most 4096 bytes; empty answers refused. tests/cases/check.json marks the Swift gap (swift_gap).",
+    "description": "Crate rule, stricter than the Swift host today (the coordinator's security decisions 2026-10-07; the Swift half goes to the ask-gallery lane): answers only for a pending question (toolCall._meta.acpmux.question), as an object of 1 to 64 item ids, each a string, a list of at most 64 strings, or the Codex form {\"answers\": [strings]} (one key only); each item id and each string at most 4096 UTF-8 bytes; the frame limit is unchanged. tests/cases/check.json marks the Swift gap (swift_gap).",
     "method": "_acpmux/permission_respond",
     "param": "answers",
     "maximum_items": 64,
-    "maximum_value_bytes": 4096
+    "maximum_list_strings": 64,
+    "maximum_string_bytes": 4096
   }
 }

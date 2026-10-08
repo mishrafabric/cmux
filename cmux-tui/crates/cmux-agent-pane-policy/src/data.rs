@@ -32,15 +32,17 @@ pub struct KnownParams {
 /// The bounds on a question's answers (crate rule, stricter than the Swift
 /// host today): `method`'s `param` is accepted only for a pending question,
 /// and only as an object of at most `maximum_items` item ids, each mapped to a
-/// string, a list of strings, or `{"answers": [strings]}` (Codex), of at most
-/// `maximum_value_bytes` UTF-8 bytes (a list: its strings together). The default (a policy that did not parse)
-/// accepts no answers.
+/// string, a list of at most `maximum_list_strings` strings, or
+/// `{"answers": [strings]}` (Codex); each id and each string at most
+/// `maximum_string_bytes` UTF-8 bytes. The default (a policy that did not
+/// parse) accepts no answers.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct QuestionAnswers {
     pub method: String,
     pub param: String,
     pub maximum_items: usize,
-    pub maximum_value_bytes: usize,
+    pub maximum_list_strings: usize,
+    pub maximum_string_bytes: usize,
 }
 
 /// The shape of a reply the host filters itself.

@@ -183,20 +183,14 @@ pub fn session_refusal(
     }
 }
 
-/// The UTF-8 bytes of a list of strings together; None when an item is not
-/// a string.
-fn strings(items: &[Value]) -> Option<usize> {
-    items.iter().map(|i| i.as_str().map(str::len)).sum()
-}
-
 /// The question answers rule (a crate rule, stricter than the Swift host
 /// today; `policy.json` `question_answers`): a frame of that method that
 /// carries the answers param breaks it unless its `permissionId` is a pending
 /// question (`is_question`, the host's [`crate::gesture::PermissionOptions`])
-/// and the answers are an object of 1 to `maximum_items` item ids, each id and
-/// each value at most `maximum_value_bytes` UTF-8 bytes, each value a string,
-/// a list of strings, or Codex's object with exactly one key `answers` holding
-/// a list of strings (a list's strings counted together).
+/// and the answers are an object of 1 to `maximum_items` item ids, each value
+/// a string, a list of at most `maximum_list_strings` strings, or Codex's
+/// object with exactly one key `answers` holding such a list, and each id and
+/// each string at most `maximum_string_bytes` UTF-8 bytes.
 pub fn breaks_answers_rule(
     object: &Map<String, Value>,
     is_question: impl Fn(&str) -> bool,
@@ -214,19 +208,19 @@ pub fn breaks_answers_rule(
     if answers.is_empty() || answers.len() > rule.maximum_items {
         return true;
     }
-    let bytes = |value: &Value| -> Option<usize> {
-        match value {
-            Value::String(s) => Some(s.len()),
-            Value::Array(items) => strings(items),
-            // Codex: `{answers: [string, ...]}` and no other key.
-            Value::Object(o) if o.len() == 1 => {
-                o.get("answers")?.as_array().map(Vec::as_slice).and_then(strings)
-            }
-            _ => None,
-        }
+    let text = |s: &str| s.len() <= rule.maximum_string_bytes;
+    let list = |items: &Vec<Value>| {
+        items.len() <= rule.maximum_list_strings
+            && items.iter().all(|i| i.as_str().is_some_and(text))
     };
-    answers.iter().any(|(id, value)| {
-        id.len() > rule.maximum_value_bytes
-            || bytes(value).is_none_or(|n| n > rule.maximum_value_bytes)
-    })
+    let fits = |value: &Value| match value {
+        Value::String(s) => text(s),
+        Value::Array(items) => list(items),
+        // Codex: `{answers: [string, ...]}` and no other key.
+        Value::Object(o) => {
+            o.len() == 1 && o.get("answers").and_then(Value::as_array).is_some_and(list)
+        }
+        _ => false,
+    };
+    answers.iter().any(|(id, value)| !text(id) || !fits(value))
 }
