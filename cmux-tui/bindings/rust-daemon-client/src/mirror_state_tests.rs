@@ -167,9 +167,9 @@ fn malformed_state_changes_leave_the_mirror_unchanged() {
         // A missing field.
         group(json!({"id": PLAY, "room_id": "default", "color": null, "collapsed": false,
                      "index": 0})),
-        // An unknown field.
+        // An unknown field (`pinned` is a known one since workspace-group-pin-v1).
         group(json!({"id": PLAY, "room_id": "default", "name": "x", "color": null,
-                     "collapsed": false, "index": 0, "pinned": true})),
+                     "collapsed": false, "index": 0, "not_a_group_field": true})),
         // A placement whose workspace does not match its id.
         json!({"kind": "state_upsert", "sequence": 0, "resource": "workspace_placement",
                "id": ALPHA_PLACEMENT, "value": {"workspace": {"session_id": REGISTRY,
