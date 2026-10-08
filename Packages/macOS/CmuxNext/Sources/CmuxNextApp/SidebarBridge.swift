@@ -34,6 +34,9 @@ final class SidebarBridge {
     private var seededProfiles: (profiles: [SidebarProfile], active: SidebarProfileKey?)?
     /// Saves what the sidebar shows (`SidebarSnapshotStore`).
     private var snapshotRecorder = SidebarSnapshotRecorder()
+    /// Organization intents sent before the home session's personal state
+    /// loaded (SidebarBridge+PendingOrganization), replayed when it loads.
+    var pendingOrganization: [SidebarIntent] = []
     /// Rows of the spaces beside the current one, for swipe pages (R99).
     let spaceCache = SpaceSectionsCache()
     /// The item the last Cmd-Ctrl-[ / ] reached and the workspace shown then (R119).
@@ -152,6 +155,9 @@ final class SidebarBridge {
         let isLaunchWindow = windows.controllers.isEmpty && windows.registry.isLaunching
         let saved = services.sidebarSnapshots.launchDocument.snapshot(for: state.id, fallback: isLaunchWindow)
         seed = SidebarSeed(sections: saved?.sidebarSections ?? [])
+        // Collapsed sections are this window's view state, saved only in its
+        // sidebar snapshot (never in a daemon): restore them before the first rows.
+        model.collapsedSections = Set((saved?.sidebarSections ?? []).filter(\.isCollapsed).map(\.id))
         if let saved, !saved.profiles.isEmpty {
             seededProfiles = (saved.sidebarProfiles, saved.sidebarActiveProfileID)
             model.profiles = saved.sidebarProfiles
@@ -169,7 +175,8 @@ final class SidebarBridge {
     private func show(_ live: [SidebarRowSection], launching: Bool, failed: Set<MachineID>) {
         let sections = seed.merge(live, launching: launching, failed: failed)
         model.ungroupedFirst = !usesMixedOrder
-        if model.sections != sections { model.sections = sections }
+        model.setSections(sections)
+        replayPendingOrganization()
         if !launching || sections.contains(where: { $0.workspaces.contains { $0.rowState != .placeholder } }) { markReadyForReveal() }
         recordSnapshot()
     }
@@ -186,7 +193,7 @@ final class SidebarBridge {
         recordSnapshot()
     }
 
-    private func recordSnapshot() {
+    func recordSnapshot() {
         guard let state else { return }
         snapshotRecorder.record(model, window: state.id, services: services)
     }

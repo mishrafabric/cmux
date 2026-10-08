@@ -12,6 +12,12 @@ import CmuxNextSidebar
 extension SidebarBridge {
     func handle(_ intent: SidebarIntent) {
         guard let state else { return }
+        // A section's collapse is this window's view state, saved with its
+        // sidebar snapshot; no daemon is asked.
+        if case .toggleCollapse(.section) = intent {
+            model.apply(intent)
+            return recordSnapshot()
+        }
         // The Pinned section is the daemon's pin, in either organization: a
         // drop there pins, a pinned workspace dropped on its own machine
         // unpins. Pinned order follows the sidebar, so a drop of workspaces
@@ -77,9 +83,9 @@ extension SidebarBridge {
         case .toggleCollapse, .createGroup, .move, .renameGroup, .setGroupColor, .ungroup, .reorderGroup:
             // Workspace groups are personal (the home session's
             // `workspace_group.*`, `handlePersonal`); the shared group
-            // commands are not used, so the daemon can drop them.
-            services.registry.refuse(daemon(ofGroupless: intent))
-            resync()
+            // commands are not used, so the daemon can drop them. Before the
+            // personal state loads the intent waits for it.
+            organizeBeforePersonalState(intent)
         case .closeGroup(let group):
             let members = (model.group(group)?.workspaces.map(\.id) ?? []).compactMap { id in
                 services.machines.workspace(id: id.rawValue).flatMap { workspace, daemon in
@@ -145,11 +151,6 @@ extension SidebarBridge {
         return (daemon, pairs.map(\.1))
     }
 
-    /// Why a group intent is refused without personal state.
-    private func daemon(ofGroupless intent: SidebarIntent) -> String {
-        services.machines.local.missingCapabilityMessage(DaemonCapabilities.shared.profiles)
-    }
-
     func reorder(_ ids: [SidebarWorkspaceID], to position: DropPosition, in sections: [SidebarRowSection]) {
         guard case .machine(let machine) = position.section, let target = services.machines.daemon(machine: machine.rawValue),
               let (daemon, _) = sameMachine(ids), daemon === target
@@ -191,9 +192,9 @@ extension SidebarBridge {
     func resync() {
         guard let state else { return }
         model.ungroupedFirst = !usesMixedOrder
-        model.sections = Self.sections(services.machines, members: services.windows.registry.members(of: state.id), profile: state.profileID,
-                                       hidesHome: Self.hidesHome(services.sidebarLayout.document), selection: state.selection,
-                                       newTabPages: services.agentTabs.pageTabs.ids, muted: services.notifications.preferences.mutedWorkspaces)
+        model.setSections(Self.sections(services.machines, members: services.windows.registry.members(of: state.id), profile: state.profileID,
+                                        hidesHome: Self.hidesHome(services.sidebarLayout.document), selection: state.selection,
+                                        newTabPages: services.agentTabs.pageTabs.ids, muted: services.notifications.preferences.mutedWorkspaces))
         model.profiles = Self.profiles(services.machines.local.store)
     }
 
