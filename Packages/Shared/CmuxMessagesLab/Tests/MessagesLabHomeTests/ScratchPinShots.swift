@@ -41,8 +41,11 @@ import Testing
                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         ctx.scaleBy(x: 2, y: 2)
         ctx.setFillColor(Fixture.background.cgColor); ctx.fill(b)
-        if c.host.isFlipped { ctx.translateBy(x: 0, y: b.height); ctx.scaleBy(x: 1, y: -1) }
-        try #require(c.host.layer).render(in: ctx)
+        ctx.translateBy(x: 0, y: b.height); ctx.scaleBy(x: 1, y: -1)
+        c.demo.layer.layoutIfNeeded(); c.demo.layer.displayIfNeeded()
+        print("SCRATCH layers demo=\(c.demo.layer.sublayers?.count ?? 0) frame=\(c.demo.layer.frame) sel=\(c.selection.layer.frame) path=\(c.selection.layer.path?.boundingBox ?? .null)")
+        c.demo.layer.render(in: ctx)
+        c.selection.layer.render(in: ctx)
         return (try #require(ctx.makeImage()), picked)
     }
 
