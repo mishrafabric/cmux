@@ -142,14 +142,17 @@ mod tests {
     fn the_wait_ends_on_the_kernel_event_when_the_scope_becomes_populated() {
         let root = temp_root("ok");
         std::fs::write(root.join("cgroup.controllers"), "cpu memory\n").ok();
+        // The kernel makes a scope's `cgroup.events` together with its
+        // directory. A test cannot make both at once: a wake between its
+        // mkdir and its file write would find no file to watch and sleep to
+        // the deadline (cx-nvhp). So the scope and its file exist, unpopulated,
+        // before the watch is armed, and the event is the kernel's rewrite.
+        let scope = root.join("s.slice").join("h.scope");
+        std::fs::create_dir_all(&scope).ok();
+        std::fs::write(scope.join("cgroup.events"), "populated 0\nfrozen 0\n").ok();
         let watch = PlacementWatch::new(&root, "s.slice", "h.scope");
         assert!(watch.is_ok(), "{:?}", watch.as_ref().err());
-        let writer_root = root.clone();
         let writer = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(50));
-            let scope = writer_root.join("s.slice").join("h.scope");
-            std::fs::create_dir_all(&scope).ok();
-            std::fs::write(scope.join("cgroup.events"), "populated 0\nfrozen 0\n").ok();
             std::thread::sleep(Duration::from_millis(50));
             std::fs::write(scope.join("cgroup.events"), "populated 1\nfrozen 0\n").ok();
         });
