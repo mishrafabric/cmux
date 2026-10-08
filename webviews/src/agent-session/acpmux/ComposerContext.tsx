@@ -434,7 +434,7 @@ function LocationPicker({
           <MenuButton className="acpmux-location-button" label={label}>
             {button}
           </MenuButton>
-          <MenuPopup className="acpmux-menu acpmux-location-menu" align="start">
+          <MenuPopup side="top" className="acpmux-menu acpmux-location-menu" align="start">
             <MenuRadioGroup value={selected ?? ""} onValueChange={pick}>
               {options.map((option) => (
                 <MenuRadioItem key={option.id} value={option.id} className="acpmux-menu-item">

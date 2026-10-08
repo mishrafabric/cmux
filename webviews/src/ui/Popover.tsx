@@ -42,9 +42,8 @@ export function virtualAnchor(anchor: UiAnchor) {
 export interface PopoverProps {
   open: boolean;
   onOpenChange(open: boolean): void;
-  /** Where it opens relative to the anchor. */
+  /** Where it opens; it opens below. */
   anchor: UiAnchor;
-  side?: "top" | "bottom";
   /** The accessible name of the popover (role dialog). */
   label: string;
   className?: string;
@@ -61,7 +60,6 @@ export function Popover({
   open,
   onOpenChange,
   anchor,
-  side = "bottom",
   label,
   className,
   side = "bottom",
