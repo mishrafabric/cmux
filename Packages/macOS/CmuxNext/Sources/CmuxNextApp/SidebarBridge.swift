@@ -34,9 +34,8 @@ final class SidebarBridge {
     private var seededProfiles: (profiles: [SidebarProfile], active: SidebarProfileKey?)?
     /// Saves what the sidebar shows (`SidebarSnapshotStore`).
     private var snapshotRecorder = SidebarSnapshotRecorder()
-    /// Organization intents sent before the home session's personal state
-    /// loaded (SidebarBridge+PendingOrganization), replayed when it loads.
-    var pendingOrganization: [SidebarIntent] = []
+    /// Organization intents waiting for the home session's personal state.
+    let organizationQueue = SidebarOrganizationQueue()
     /// Rows of the spaces beside the current one, for swipe pages (R99).
     let spaceCache = SpaceSectionsCache()
     /// The item the last Cmd-Ctrl-[ / ] reached and the workspace shown then (R119).
@@ -155,8 +154,7 @@ final class SidebarBridge {
         let isLaunchWindow = windows.controllers.isEmpty && windows.registry.isLaunching
         let saved = services.sidebarSnapshots.launchDocument.snapshot(for: state.id, fallback: isLaunchWindow)
         seed = SidebarSeed(sections: saved?.sidebarSections ?? [])
-        // Collapsed sections are this window's view state, saved only in its
-        // sidebar snapshot (never in a daemon): restore them before the first rows.
+        // Collapsed sections: this window's view state, saved only in its sidebar snapshot.
         model.collapsedSections = Set((saved?.sidebarSections ?? []).filter(\.isCollapsed).map(\.id))
         if let saved, !saved.profiles.isEmpty {
             seededProfiles = (saved.sidebarProfiles, saved.sidebarActiveProfileID)
@@ -176,7 +174,7 @@ final class SidebarBridge {
         let sections = seed.merge(live, launching: launching, failed: failed)
         model.ungroupedFirst = !usesMixedOrder
         model.setSections(sections)
-        replayPendingOrganization()
+        organizationQueue.drain(loaded: usesPersonalOrganization, local: services.machines.local, run: handle, refuse: refuseOrganization)
         if !launching || sections.contains(where: { $0.workspaces.contains { $0.rowState != .placeholder } }) { markReadyForReveal() }
         recordSnapshot()
     }

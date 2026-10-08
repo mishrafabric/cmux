@@ -34,6 +34,12 @@ extension DaemonService {
         return isLocal ? RefusalStrings.needsDaemonCapability(capability) : RefusalStrings.updateCloudMachine
     }
 
+    /// The home daemon may still bring personal state: it has not answered
+    /// yet, or it serves `profiles-v1` (its next snapshot carries it).
+    var personalStateMayLoad: Bool {
+        !startup.isUnavailable && (identity == nil || supports(DaemonCapabilities.shared.profiles))
+    }
+
     /// Why the home session's personal state (spaces, workspace groups) is
     /// not usable now: still loading on a daemon that serves `profiles-v1`,
     /// else the capability gate's reason.

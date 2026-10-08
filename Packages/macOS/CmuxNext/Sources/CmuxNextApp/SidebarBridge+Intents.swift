@@ -12,8 +12,7 @@ import CmuxNextSidebar
 extension SidebarBridge {
     func handle(_ intent: SidebarIntent) {
         guard let state else { return }
-        // A section's collapse is this window's view state, saved with its
-        // sidebar snapshot; no daemon is asked.
+        // A section's collapse is window view state (sidebar snapshot), never a daemon command.
         if case .toggleCollapse(.section) = intent {
             model.apply(intent)
             return recordSnapshot()
@@ -83,9 +82,8 @@ extension SidebarBridge {
         case .toggleCollapse, .createGroup, .move, .renameGroup, .setGroupColor, .ungroup, .reorderGroup:
             // Workspace groups are personal (the home session's
             // `workspace_group.*`, `handlePersonal`); the shared group
-            // commands are not used, so the daemon can drop them. Before the
-            // personal state loads the intent waits for it.
-            organizeBeforePersonalState(intent)
+            // commands are not used, so the daemon can drop them. Before personal state loads it waits.
+            if !organizationQueue.hold(intent, local: services.machines.local) { refuseOrganization() }
         case .closeGroup(let group):
             let members = (model.group(group)?.workspaces.map(\.id) ?? []).compactMap { id in
                 services.machines.workspace(id: id.rawValue).flatMap { workspace, daemon in
@@ -186,6 +184,12 @@ extension SidebarBridge {
                 }
             }
         }
+    }
+
+    /// Refuses an organization intent that personal state cannot take.
+    func refuseOrganization() {
+        services.registry.refuse(services.machines.local.personalStateUnavailableReason)
+        resync()
     }
 
     /// Puts daemon truth back after a refused or rejected intent.
