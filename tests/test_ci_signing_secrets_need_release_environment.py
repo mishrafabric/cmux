@@ -10,6 +10,8 @@ environments whose deployment policy admits the refs that really release:
 - `release`: branch main and tags v*
 - `release-next`: branch nightly-next
 - `content-signing`: the content-signing key only
+- `ffi-release`: branch feat-cmux-next, the release App credentials only,
+  for app-ffi-release.yml's publish job (ruleset 24624526 admits that App)
 
 A job without such an environment would read nothing once the repository-level
 copies are deleted, so this guard fails before that breaks a release. It also
@@ -31,6 +33,7 @@ WORKFLOWS = ROOT / ".github/workflows"
 
 RELEASE_ENVIRONMENTS = {"release", "release-next"}
 CONTENT_SIGNING_ENVIRONMENTS = {"content-signing"}
+FFI_RELEASE_ENVIRONMENTS = {"ffi-release"}
 
 SIGNING_SECRET = re.compile(
     r"^(APPLE_[A-Z0-9_]+"
@@ -53,6 +56,8 @@ SET_ENVIRONMENT = re.compile(r"setOutput\(\s*['\"]environment['\"]\s*,\s*([^;\n]
 def allowed_for(secret: str) -> set[str]:
     if secret.startswith("CONTENT_SIGNING_"):
         return CONTENT_SIGNING_ENVIRONMENTS
+    if secret == "CMUX_RELEASE_APP_KEY":
+        return RELEASE_ENVIRONMENTS | FFI_RELEASE_ENVIRONMENTS
     return RELEASE_ENVIRONMENTS
 
 
