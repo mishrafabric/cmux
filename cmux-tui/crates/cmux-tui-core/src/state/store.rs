@@ -41,7 +41,8 @@ pub(crate) fn create_state_schema(transaction: &Transaction<'_>) -> anyhow::Resu
            tab_id TEXT PRIMARY KEY NOT NULL,
            zoom REAL,
            back_json TEXT,
-           forward_json TEXT
+           forward_json TEXT,
+           icon TEXT
          );
          CREATE TABLE IF NOT EXISTS workspace_status_entries (
            workspace_id TEXT NOT NULL,
@@ -78,8 +79,11 @@ pub(crate) fn create_state_schema(transaction: &Transaction<'_>) -> anyhow::Resu
            updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms >= 0)
          );",
     )?;
+    super::tab_state_store::add_tab_icon_column(transaction)?;
     super::closed_history_store::create_closed_history_schema(transaction)?;
+    super::agent_folder::create_agent_folder_schema(transaction)?;
     super::window_record_store::create_window_record_schema(transaction)?;
+    super::sidebar_layout_store::create_sidebar_layout_schema(transaction)?;
     super::kept_tab_store::create_kept_tab_schema(transaction)?;
     super::home_store::create_home_schema(transaction)?;
     super::conversation_tabs_store::create_conversation_tabs_schema(transaction)?;
@@ -297,6 +301,7 @@ pub(crate) fn state_snapshot(connection: &Connection) -> anyhow::Result<Value> {
         "closed": super::closed_history_store::closed_items(connection)?,
         "workspace_status": super::workspace_status_store::status_snapshots(connection)?,
         "window_records": super::window_record_store::record_snapshots(connection)?,
+        "sidebar_layout": super::sidebar_layout_store::snapshot(connection)?,
     }))
 }
 

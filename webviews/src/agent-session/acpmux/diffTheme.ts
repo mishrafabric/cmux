@@ -32,6 +32,25 @@ const fallbackDark = {
 /// The pane's colors, each a theme variable with a dark fallback behind it. The diffs sit on
 /// the page background, so the changes view is one surface with the transcript. Additions and
 /// deletions read `--acpmux-add` and `--acpmux-del` (styles.css), which a theme can set.
+/**
+ * The mask of a clipped tree name (changes/treeTitles.ts): opaque across the name, fading over
+ * --cmux-title-lead at its start and --cmux-title-fade at its end. The end fades on a cosine (ease-in)
+ * curve, so the glyphs there stay readable almost to the edge and the fade has no visible start;
+ * the start mirrors it. Eight stops each make the curve smooth at any fade length.
+ */
+const TITLE_MASK = (() => {
+  const steps = 8;
+  const alpha = (p: number) => Math.round(Math.cos((p * Math.PI) / 2) * 1000) / 1000;
+  const lead = Array.from({ length: steps + 1 }, (_, i) => {
+    const p = i / steps;
+    return `rgb(0 0 0 / ${alpha(1 - p)}) calc(var(--cmux-title-lead, 0px) * ${p})`;
+  });
+  const tail = Array.from({ length: steps + 1 }, (_, i) => {
+    const p = i / steps;
+    return `rgb(0 0 0 / ${alpha(p)}) calc(100% - var(--cmux-title-fade, 20px) * ${1 - p})`;
+  });
+  return `linear-gradient(to right, ${[...lead, ...tail].join(", ")})`;
+})();
 const addition = `var(--acpmux-add, ${fallbackDark.addition})`;
 const deletion = `var(--acpmux-del, ${fallbackDark.deletion})`;
 export const diffColors = {
@@ -201,7 +220,36 @@ export const treeUnsafeCSS = /* css */ `
   --trees-border-radius-override: 6px;
   --trees-focus-ring-width-override: 0px;
   --trees-indent-guide-bg-override: ${c.line};
+  --trees-status-added-override: ${c.addition};
+  --trees-status-deleted-override: ${c.deletion};
 }
 [data-type="item"][data-item-focused="true"]::before { display: none; }
 [data-item-section="decoration"] { font-size: 12px; }
+/* Long names (changes/treeTitles.ts): one unclipped line inside the content section, which clips
+   it with a fade at its end (no ellipsis, no middle truncation keeping the extension); the counts
+   never shrink. --cmux-title-lead is padding left of the first glyph, inside the section, that a
+   marquee fades glyphs across; the negative margin keeps the name where Pierre puts it.
+   --cmux-title-tail is the gap before the counts, also inside the section, so the fade ends at
+   the counts (or the row's end) and the name uses all the room there is. */
+[data-type="item"] [data-item-section="content"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  margin-inline-start: calc(-1 * var(--cmux-title-lead, 0px));
+  padding-inline-start: var(--cmux-title-lead, 0px);
+  padding-inline-end: var(--cmux-title-tail, 0px);
+}
+[data-type="item"] [data-item-section="content"] > * { width: max-content; min-width: max-content; max-width: none; }
+[data-type="item"] [data-item-section="content"] [data-truncate-group-container] > div { flex: none; min-width: max-content; }
+[data-type="item"] [data-item-section="content"] [data-truncate-container] { overflow: visible; min-width: max-content; }
+[data-type="item"] [data-item-section="content"] [data-truncate-grid] { display: block; }
+[data-type="item"] [data-item-section="content"] :is([data-truncate-content="overflow"], [data-truncate-marker-cell], [data-truncate-fill]) { display: none; }
+[data-type="item"] [data-item-section="content"] [data-truncate-content="visible"] { white-space: pre; }
+[data-type="item"] [data-item-section="content"][data-cmux-clipped] {
+  -webkit-mask-image: ${TITLE_MASK};
+  mask-image: ${TITLE_MASK};
+}
+[data-type="item"] [data-item-section="decoration"] { flex: 0 0 auto; margin-inline-start: auto; }
 ${PIERRE_TREES_SCROLLER_CSS}`;

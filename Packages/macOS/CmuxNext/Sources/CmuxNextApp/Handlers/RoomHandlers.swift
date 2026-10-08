@@ -88,8 +88,20 @@ enum RoomHandlers {
             let room = try context.room(invocation)
             guard !room.isDefault else { throw ActionFailure.invalidTarget(RoomStrings.defaultCannotBeDeleted) }
             let moveTo = try context.optionalRoom(invocation["moveTo"])?.id
-            let id = room.id
-            context.services.machines.local.send("delete-profile") { _ = try await $0.deleteProfile(id, moveTo: moveTo) }
+            let id = room.id, name = room.name, services = context.services
+            // Delete Space closes the workspaces only this space shows, in
+            // the daemon (SPACE-DELETE-CLOSES-ITS-WORKSPACES); the app
+            // releases their remote-terminal tabs first, as for any close.
+            if moveTo == nil {
+                for workspace in RoomConfirmation.closing(id, context) { WorkspaceClose.willClose?(workspace) }
+            }
+            // A person's delete gets the Reopen toast; automation does not.
+            let toast = moveTo == nil && invocation.origin == .user
+            services.machines.local.send("delete-profile") { connection in
+                let response = try await connection.deleteProfile(id, moveTo: moveTo)
+                guard toast, let closedID = response.closedID else { return }
+                await RoomConfirmation.showDeleted(name, closedID: closedID, services: services)
+            }
         }
         bind("space.moveLeft") { try move(invocation: $0, by: -1, context) }
         bind("space.moveRight") { try move(invocation: $0, by: 1, context) }
@@ -128,7 +140,7 @@ enum RoomHandlers {
         let name = invocation["name"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } ?? RoomStrings.defaultName(store.profileIDs.count + 1)
         let used = Set(store.profiles.compactMap(\.color))
         let color = invocation["color"]?.stringValue.flatMap(GroupColor.init(rawValue:))
-            ?? GroupColor.allCases.first { !used.contains($0.rawValue) && $0 != .grey } ?? .grey
+            ?? GroupColor.automatic(used: used) ?? .grey
         let icon = invocation["icon"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
         let active = context.activeWindow?.state
         // A new room shares the current room's browser profile, so logins

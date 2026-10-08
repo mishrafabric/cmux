@@ -352,6 +352,12 @@ try {
   await step("cmux-etc", "mkdir -p /etc/cmux /etc/skel");
   await put("cmux-bashrc", "/etc/cmux/bashrc");
   await put("cmux-prompt.bash", "/etc/cmux/prompt.bash");
+  await step("python-completion-dir", "mkdir -p /usr/local/share/bash-completion/completions");
+  await put("cmux-python-completion.bash", "/usr/local/share/bash-completion/completions/python");
+  await step(
+    "python-completion",
+    `for f in /usr/share/bash-completion/completions/python?* /usr/share/bash-completion/completions/pypy* /usr/share/bash-completion/completions/micropython; do if [ -e "$f" ]; then ln -sf python "/usr/local/share/bash-completion/completions/\${f##*/}"; fi; done && bash -n /usr/local/share/bash-completion/completions/python`,
+  );
   await step("prompt-default-name", "echo cmux > /etc/cmux/vm-name");
   await put("seed-history", "/etc/cmux/seed-history");
   await put("cmux-terminfo.sh", "/etc/profile.d/cmux-terminfo.sh");
@@ -541,6 +547,9 @@ try {
     // defaults to 0.0.0.0 for the container providers, whose runtimes may have
     // IPv6 disabled entirely.
     "Environment=CMUX_TUI_REMOTE_WS_BIND=[::]:1337",
+    // Each terminal host gets its own transient scope (cmux-tui host_scope.rs),
+    // so a stop or restart of this unit keeps every terminal for re-adoption.
+    "Environment=CMUX_TUI_HOST_SCOPES=systemd",
     // Pane shells inherit this PATH; /usr/local/bin carries the base's Node
     // and every pinned agent as symlinks, so no login shell is needed.
     "Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",

@@ -71,6 +71,10 @@ pub enum HarnessKind {
     Acp,
     /// Claude Code's own `-p --input-format stream-json` protocol.
     ClaudeStdio,
+    /// A CLI or TUI without ACP (`protocol = "terminal"` in a profile file):
+    /// listed, but run in a terminal tab (`cmux harness run`), never as an
+    /// acpmux session.
+    Terminal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -448,6 +452,25 @@ pub struct Config {
     /// family preference or fallback routes new work to them.
     #[serde(skip)]
     pub unavailable: BTreeMap<String, String>,
+    /// Display, capability, auth and sessions data of the profiles that came
+    /// from profile files or cmux.json (`config/profiles.rs`), by id. Those
+    /// profiles are never written to config.json.
+    #[serde(skip)]
+    pub profile_meta: BTreeMap<String, ProfileMeta>,
+    /// Problems in the profile sources, for `harness list`, doctor and Settings.
+    #[serde(skip)]
+    pub profile_diagnostics: Vec<ProfileDiagnostic>,
+    /// config.json entries a profile file replaced; `save` keeps them.
+    #[serde(skip)]
+    pub shadowed_config: BTreeMap<String, HarnessProfile>,
+    /// Where folder profiles' trust and enable records are read (H4,
+    /// `config/folder_profiles.rs`); None (an in-code config): no folder profiles.
+    #[serde(skip)]
+    pub folder_gate: Option<folder_profiles::FolderGate>,
+    /// The profile file sources this config was loaded from; a reload and
+    /// the hot-reload watcher read the same ones.
+    #[serde(skip)]
+    pub profile_sources: ProfileSources,
 }
 
 impl Config {
@@ -548,6 +571,11 @@ impl Config {
     }
 
     pub fn load_from(path: &Path) -> Result<Self> {
+        Self::load_from_with(path, &ProfileSources::current())
+    }
+
+    /// `load_from` with explicit profile file sources.
+    pub fn load_from_with(path: &Path, sources: &ProfileSources) -> Result<Self> {
         let path = path.to_owned();
         let mut cfg = if path.exists() {
             let text = std::fs::read_to_string(&path)
@@ -557,13 +585,30 @@ impl Config {
         } else {
             Config::default()
         };
+        cfg.join_profiles(profiles::load(sources));
         cfg.join_discovered(discover_harnesses());
         if cfg.default_harness.is_none() {
             cfg.auto_default = true;
             cfg.default_harness = cfg.harnesses.keys().next().cloned();
         }
+        cfg.folder_gate = path.parent().and_then(folder_profiles::FolderGate::for_home);
+        cfg.profile_sources = sources.clone();
         cfg.path = Some(path);
         Ok(cfg)
+    }
+
+    /// Adds the profiles from profile files and cmux.json. They win over
+    /// config.json entries with the same id (kept for `save`).
+    pub fn join_profiles(&mut self, loaded: LoadedProfiles) {
+        for (id, (profile, meta)) in loaded.profiles {
+            if let Some(old) = self.harnesses.insert(id.clone(), profile)
+                && !self.profile_meta.contains_key(&id)
+            {
+                self.shadowed_config.insert(id.clone(), old);
+            }
+            self.profile_meta.insert(id, meta);
+        }
+        self.profile_diagnostics.extend(loaded.diagnostics);
     }
 
     /// Joins discovered harnesses to the configured ones (configured entries
@@ -629,7 +674,12 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
         let mut on_disk = self.clone();
-        on_disk.harnesses.retain(|n, _| !self.discovered.contains(n));
+        on_disk
+            .harnesses
+            .retain(|n, _| !self.discovered.contains(n) && !self.profile_meta.contains_key(n));
+        for (n, p) in &self.shadowed_config {
+            on_disk.harnesses.insert(n.clone(), p.clone());
+        }
         if let Some((p, f)) = &self.auto_fallback
             && let Some(prof) = on_disk.harnesses.get_mut(p)
             && prof.fallback.as_deref() == Some(f.as_str())
@@ -659,161 +709,6 @@ impl Config {
     pub fn web_listener(&self) -> Option<&WebSocketConfig> {
         self.websocket.as_ref().filter(|_| !self.web_unbound)
     }
-}
-
-/// Drop discovered launcher profiles whose binary cannot actually run the
-/// harness: an older subrouter without `claude proxy`, or one whose proxy
-/// setup fails before Claude starts. Runs once at daemon start, so a
-/// `claude` session never fails over into a launcher that dies at once.
-pub fn verify_launchers(cfg: &mut Config) {
-    let servers =
-        dirs::home_dir().map(|home| home.join(".subrouter/codex/servers.json")).unwrap_or_default();
-    let env_route =
-        std::env::var("SUBROUTER_URL").ok().or_else(|| crate::login_env::var("SUBROUTER_URL"));
-    let route = subrouter_route(env_route.as_deref(), &servers);
-    verify_launchers_with(cfg, route);
-}
-
-/// The subrouter server Claude traffic goes to when `sr` has no `claude proxy`:
-/// `SUBROUTER_URL`, else the default server in `sr`'s own list
-/// (`~/.subrouter/codex/servers.json`, read only). Only an http(s) URL counts.
-pub fn subrouter_route(env_url: Option<&str>, servers_json: &std::path::Path) -> Option<String> {
-    let http = |url: &str| {
-        let url = url.trim().trim_end_matches('/');
-        (url.starts_with("http://") || url.starts_with("https://")).then(|| url.to_owned())
-    };
-    if let Some(url) = env_url.and_then(http) {
-        return Some(url);
-    }
-    let value: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(servers_json).ok()?).ok()?;
-    let default = value.get("default")?.as_str()?;
-    value
-        .get("servers")?
-        .as_array()?
-        .iter()
-        .find(|server| server.get("name").and_then(|n| n.as_str()) == Some(default))?
-        .get("url")?
-        .as_str()
-        .and_then(http)
-}
-
-/// `verify_launchers` with the subrouter route given: a proxy launcher that
-/// fails becomes the `claude` profile routed through that server when there
-/// is one and it is acpmux's own adapter (`claude-stdio`), else it is
-/// marked unavailable.
-pub fn verify_launchers_with(cfg: &mut Config, route: Option<String>) {
-    let candidates: Vec<(String, Vec<String>)> = cfg
-        .harnesses
-        .iter()
-        .filter(|(_, p)| {
-            p.argv.get(1).map(String::as_str) == Some("claude")
-                && p.argv.get(2).map(String::as_str) == Some("proxy")
-        })
-        .map(|(n, p)| (n.clone(), p.argv.clone()))
-        .collect();
-    for (name, argv) in candidates {
-        if let Err(reason) = launcher_ok(&argv) {
-            // Only acpmux's own adapter takes over: claude-sr never becomes
-            // an ACP adapter (`claude` imported from ~/.acpx, say).
-            if let Some(url) = &route
-                && let Some(claude) = cfg
-                    .harnesses
-                    .get("claude")
-                    .filter(|c| c.kind == HarnessKind::ClaudeStdio)
-                    .cloned()
-            {
-                tracing::info!(agent = %name, %url, "{reason}; routing Claude through the subrouter server");
-                let mut env = claude.env.clone();
-                env.insert("ANTHROPIC_BASE_URL".into(), url.clone());
-                // The server picks the pooled account and ignores the client token.
-                env.insert("ANTHROPIC_AUTH_TOKEN".into(), "subrouter".into());
-                env.insert("ANTHROPIC_CUSTOM_HEADERS".into(), "X-Subrouter-Agent: claude".into());
-                let previous = cfg.harnesses.get(&name).cloned();
-                cfg.harnesses.insert(
-                    name.clone(),
-                    HarnessProfile {
-                        kind: claude.kind,
-                        argv: claude.argv.clone(),
-                        env,
-                        description: Some(format!("Claude through the subrouter server {url}")),
-                        fallback: None,
-                        family: previous
-                            .as_ref()
-                            .and_then(|p| p.family.clone())
-                            .or(Some("claude".into())),
-                        models: previous.as_ref().map(|p| p.models.clone()).unwrap_or_default(),
-                        model: previous.as_ref().and_then(|p| p.model.clone()),
-                        effort: previous.as_ref().and_then(|p| p.effort.clone()),
-                        policy: previous.as_ref().and_then(|p| p.policy),
-                    },
-                );
-                continue;
-            }
-            tracing::warn!(agent = %name, "launcher unavailable: {reason}");
-            cfg.unavailable.insert(name.clone(), reason);
-            for p in cfg.harnesses.values_mut() {
-                if p.fallback.as_deref() == Some(name.as_str()) {
-                    p.fallback = None;
-                }
-            }
-        }
-    }
-}
-
-fn launcher_ok(argv: &[String]) -> std::result::Result<(), String> {
-    let mut cmd = std::process::Command::new(&argv[0]);
-    crate::login_env::apply_std(&mut cmd);
-    cmd.args(&argv[1..])
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    scrub_nested_claude_env(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| format!("{}: {e}", argv[0]))?;
-    // Woken by the child's exit (SIGCHLD), not a polling tick.
-    use wait_timeout::ChildExt;
-    match child.wait_timeout(std::time::Duration::from_secs(20)) {
-        Ok(Some(_)) => {}
-        Ok(None) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("{} claude proxy --version did not finish in 20s", argv[0]));
-        }
-        Err(e) => return Err(e.to_string()),
-    }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    let text =
-        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    // Warnings (a peer that could not be reached) are not failures.
-    let first = text
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty() && !l.starts_with("warning:"))
-        .unwrap_or("")
-        .to_owned();
-    if !out.status.success()
-        || first.starts_with("subrouter:")
-        || text.to_lowercase().contains("unknown command")
-    {
-        return Err(format!(
-            "`{} claude proxy --version` failed: {}",
-            argv[0],
-            if first.is_empty() { out.status.to_string() } else { first }
-        ));
-    }
-    Ok(())
-}
-
-fn which(bin: &str) -> Option<String> {
-    let path = crate::login_env::path()?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(bin);
-        if candidate.is_file() {
-            return Some(candidate.to_string_lossy().into_owned());
-        }
-    }
-    None
 }
 
 fn is_default_kind(k: &HarnessKind) -> bool {
@@ -880,6 +775,11 @@ pub fn scrub_nested_claude_env_tokio(cmd: &mut tokio::process::Command) {
     }
 }
 
+mod launchers;
+#[cfg(test)]
+pub(super) use launchers::launcher_ok;
+pub(crate) use launchers::which;
+pub use launchers::{subrouter_route, verify_launchers, verify_launchers_with};
 mod codex_adapter;
 mod discover;
 pub use codex_adapter::{
@@ -891,6 +791,11 @@ mod peer;
 pub use peer::PeerConfig;
 mod pool;
 pub use pool::PoolConfig;
+pub mod folder_profiles;
+pub mod profiles;
+pub use profiles::{
+    Diagnostic as ProfileDiagnostic, LoadedProfiles, ProfileMeta, ProfileSource, ProfileSources,
+};
 mod preset_args;
 pub use preset_args::{
     Preset, SYSTEM_PROMPT_FILE, check_preset_args, check_preset_dir_name, checked_system_prompt,

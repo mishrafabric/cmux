@@ -32,7 +32,7 @@ extension SidebarBridge {
                 if !leaving.isEmpty { sendPinned(leaving, false) }
             }
         }
-        if usesPersonalOrganization, handlePersonal(intent) { return }
+        if usesPersonalOrganization, PersonalGroupPin(bridge: self).handle(intent) || handlePersonal(intent) { return }
         switch intent {
         case .select(let id):
             // A placeholder row is no workspace: never claimed or shown.
@@ -103,12 +103,12 @@ extension SidebarBridge {
             sendPinned(ids, pinned)
         case .activateItem(let id, let opensWorkspace):
             activateLayoutItem(id, opensWorkspace: opensWorkspace)
-        case .installUpdate:
-            // The footer pill: install the staged update and relaunch; the
-            // relaunch keeps every session (SIDEBAR-FOOTER-MINIMAL).
-            services.updater.installClicked()
+        case .installUpdate, .setAutomaticUpdates, .openUpdateLink, .tryTip, .dismissTip:
+            SidebarCardFeed.handle(intent, services: services)
         case .layout(let op):
             applyLayoutOp(op)
+        case .dropOnLayoutSection(let ids, let section, let index):
+            PinCommands(context: AppActionContext(services: services)).userDrop(ids.map(\.rawValue), on: section, at: index)
         case .toggleLayoutSection:
             model.apply(intent)
         case .setIcon, .setGroupPinned, .openGroup:
@@ -191,9 +191,9 @@ extension SidebarBridge {
     func resync() {
         guard let state else { return }
         model.ungroupedFirst = !usesMixedOrder
-        model.sections = Self.sections(services.machines, members: services.windows.registry.members(of: state.id),
-                                       profile: state.profileID, hidesHome: Self.hidesHome(services.sidebarLayout.document),
-                                       selection: state.selection)
+        model.sections = Self.sections(services.machines, members: services.windows.registry.members(of: state.id), profile: state.profileID,
+                                       hidesHome: Self.hidesHome(services.sidebarLayout.document), selection: state.selection,
+                                       newTabPages: services.agentTabs.pageTabs.ids, muted: services.notifications.preferences.mutedWorkspaces)
         model.profiles = Self.profiles(services.machines.local.store)
     }
 

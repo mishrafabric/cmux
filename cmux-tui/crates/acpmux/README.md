@@ -97,6 +97,7 @@ Five everyday commands, three groups for the rest:
 | `host setup HOST` / `host update [--all]` / `host add NAME URL` / `host ls` / `host rm NAME` | Remote daemons. `setup` installs over ssh; URL is `ssh://host`, `ws://…`, or `wss://…`. |
 | `session info\|cancel\|stop\|rename\|fork\|set\|allow\|deny\|export\|import\|tail NAME …` | Everything about one session. |
 | `daemon run\|status\|shutdown\|config\|harnesses\|reload\|models\|schema` | The daemon itself. |
+| `daemon shutdown [--keep-agents]` | Stop the daemon and every agent host it owns; exits 0 only when none is left, and names any host that survives SIGKILL. `--keep-agents` leaves the user sessions' hosts running for the next daemon. |
 
 The older flat spellings (`acpmux kill NAME`, `acpmux peer add …`, `acpmux status`) still
 work but are hidden from help.
@@ -380,6 +381,12 @@ transcript, a drag that reaches the top or bottom edge keeps scrolling while the
 there, and a selection covers only the useful text: the gutter, role markers and trailing
 padding are never highlighted or copied. The composer grows to 12 rows before it scrolls; set `"composerMaxRows"` in
 `~/.acpmux/config.json` or `ACPMUX_COMPOSER_ROWS` to change it.
+
+## Bring your own harness
+
+Any harness can be added with one profile file (`~/.config/cmux/harnesses/<id>.toml`), checked
+with `acpmux harness doctor <id>` (also `cmux harness …`). Schema, secrets, terminal harnesses,
+folder profiles and the ACP adapter guide: [docs/add-your-harness.md](../../../docs/add-your-harness.md).
 
 ## Picking a harness and a model: `-m HARNESS[/MODEL]`, `-p PRESET`
 
@@ -739,7 +746,7 @@ Claude Code sessions run over Claude's own headless protocol, not ACP:
 session stays alive until you stop it. acpmux translates the stream into the same events the
 TUI, web page, and peers already understand, so nothing changes for the user.
 
-What this gives over the ACP adapter: no injected MCP servers or hooks, real permission
+What this gives over the ACP adapter: none of the adapter's injected MCP servers or hooks, real permission
 prompts with Claude's own options, `AskUserQuestion` and plan approval answered from the TUI
 or web page, model and mode changes mid-session, exact resume with `--resume`, fork with
 `--fork-session`, and background Bash tasks that live as long as the session because the
@@ -754,6 +761,17 @@ Everything after `claude` in `argv` is passed through, so `--settings`, `--mcp-c
 picks this backend automatically when `claude` is on PATH. Interrupt uses Claude's
 `control_request` `interrupt`; the interrupted turn ends with `stopReason: cancelled` and the
 process keeps running.
+
+### cmux tools in every session
+
+Every local session gets cmux's own agent tools: the `cmux-cua` MCP server (Computer Use)
+when `cmux-cua` sits next to the acpmux binary, the `cmux` MCP server with the browser REPL
+tools when `cmux.json` sets `"mcp": {"enabled": true}`, and, for Claude Code, a session-only
+plugin `cmux` with the skills `cmux:cmux-browser` and `cmux:cmux-cua`. Set
+`ACPMUX_AGENT_TOOLS=0` in the daemon's environment to turn all of them off, or in one
+profile's or preset's `env` to turn them off for that profile only. A Claude profile whose
+`argv` has `--strict-mcp-config` also gets none of them, so it keeps exactly the servers its
+own `--mcp-config` names.
 
 Stopping a session kills the agent's whole process group, so background shells the agent
 started stop with it. Resume afterwards is exact, but the agent no longer remembers those

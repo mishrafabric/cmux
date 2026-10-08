@@ -1,5 +1,5 @@
 /* This file is generated. Do not edit by hand. */
-/* cmux-tui mux protocol 12, IR 55ecd131c02ab3542822be1b9f1292905fa54dee7cea4f22efd4d6ee5d79ba3e. */
+/* cmux-tui mux protocol 12, IR 50ad745ac15be0742665d30da5813d864971d0225a7ae64814d1bd2bdf2a3089. */
 
 
 import type * as T from "./types.js";
@@ -396,6 +396,26 @@ export interface CloudInboxUnsubscribeRequest extends CmuxRequestBase {
   cmd: "cloud-inbox-unsubscribe";
 }
 export type CloudInboxUnsubscribeResult = T.JsonValue;
+
+/** Protocol v12; authority: local-admin. */
+export interface CloudMuxAckRequest extends CmuxRequestBase {
+  cmd: "cloud-mux-ack";
+  "conversation": string;
+  "seq": bigint;
+}
+export type CloudMuxAckResult = T.JsonValue;
+
+/** Protocol v12; authority: local-admin. */
+export interface CloudMuxSubscribeRequest extends CmuxRequestBase {
+  cmd: "cloud-mux-subscribe";
+}
+export type CloudMuxSubscribeResult = T.JsonValue;
+
+/** Protocol v12; authority: local-admin. */
+export interface CloudMuxUnsubscribeRequest extends CmuxRequestBase {
+  cmd: "cloud-mux-unsubscribe";
+}
+export type CloudMuxUnsubscribeResult = T.JsonValue;
 
 /** Protocol v12; authority: local-admin. */
 export interface CloudSessionClearRequest extends CmuxRequestBase {
@@ -1280,6 +1300,7 @@ export type NewConversationTabResult = {
 export interface NewFrontendBrowserTabRequest extends CmuxRequestBase {
   cmd: "new-frontend-browser-tab";
   "activate"?: boolean;
+  "after"?: (T.Id) | null;
   "cols"?: (number) | null;
   "engine": string;
   "favicon_url"?: (string) | null;
@@ -1791,6 +1812,8 @@ export interface SetColumnDockRequest extends CmuxRequestBase {
   "edge"?: (string) | null;
   "mode"?: (string) | null;
   "pane": T.Id;
+  "permanent"?: (boolean) | null;
+  "role"?: (string) | null;
   "transaction"?: (bigint) | null;
 }
 export type SetColumnDockResult = T.JsonValue;
@@ -2330,6 +2353,9 @@ export type CmuxRequest =
   | CloudInboxListRequest
   | CloudInboxSubscribeRequest
   | CloudInboxUnsubscribeRequest
+  | CloudMuxAckRequest
+  | CloudMuxSubscribeRequest
+  | CloudMuxUnsubscribeRequest
   | CloudSessionClearRequest
   | CloudSessionSetRequest
   | CloudSessionStatusRequest
@@ -2840,6 +2866,30 @@ export interface CmuxCommandDefinitionMap {
   "cloud-inbox-unsubscribe": {
     request: CloudInboxUnsubscribeRequest;
     result: CloudInboxUnsubscribeResult;
+    authority: "local-admin";
+    since: 12;
+    capability: "cloud-conversations-v1";
+    stream: null;
+  };
+  "cloud-mux-ack": {
+    request: CloudMuxAckRequest;
+    result: CloudMuxAckResult;
+    authority: "local-admin";
+    since: 12;
+    capability: "cloud-conversations-v1";
+    stream: null;
+  };
+  "cloud-mux-subscribe": {
+    request: CloudMuxSubscribeRequest;
+    result: CloudMuxSubscribeResult;
+    authority: "local-admin";
+    since: 12;
+    capability: "cloud-conversations-v1";
+    stream: null;
+  };
+  "cloud-mux-unsubscribe": {
+    request: CloudMuxUnsubscribeRequest;
+    result: CloudMuxUnsubscribeResult;
     authority: "local-admin";
     since: 12;
     capability: "cloud-conversations-v1";
