@@ -13,7 +13,7 @@ import Testing
         "Select this sentence to check the highlight on the transcript.",
     ]
 
-    private func render(dark: Bool) throws -> (CGImage, String) {
+    private func render(dark: Bool) async throws -> (CGImage, String) {
         let theme = dark
             ? HomePalette.Theme(background: .gray255(30), foreground: .gray255(235), accent: .rgb255(10, 132, 255), failure: .rgb255(255, 69, 58))
             : HomePalette.Theme(background: .gray255(255), foreground: .gray255(20), accent: .rgb255(0, 122, 255), failure: .rgb255(255, 59, 48))
@@ -33,25 +33,27 @@ import Testing
         _ = c.selection.mouseUp()
         #expect(!c.selection.isEmpty, "the drag made a selection")
         let picked = c.selection.selectedRanges().map(\.text).joined()
-        c.host.layoutSubtreeIfNeeded(); c.demo.collection.layoutIfNeeded()
-        CATransaction.flush()
+        for _ in 0..<30 {
+            try await Task.sleep(for: .milliseconds(40))
+            c.host.layoutSubtreeIfNeeded(); c.demo.collection.layoutIfNeeded(); CATransaction.flush()
+        }
         let b = c.host.bounds
         let ctx = try #require(CGContext(data: nil, width: Int(b.width * 2), height: Int(b.height * 2), bitsPerComponent: 8,
                                          bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         ctx.scaleBy(x: 2, y: 2)
         ctx.setFillColor(Fixture.background.cgColor); ctx.fill(b)
-        ctx.translateBy(x: 0, y: b.height); ctx.scaleBy(x: 1, y: -1)
         c.demo.layer.layoutIfNeeded(); c.demo.layer.displayIfNeeded()
         print("SCRATCH layers demo=\(c.demo.layer.sublayers?.count ?? 0) frame=\(c.demo.layer.frame) sel=\(c.selection.layer.frame) path=\(c.selection.layer.path?.boundingBox ?? .null)")
-        c.demo.layer.render(in: ctx)
-        c.selection.layer.render(in: ctx)
+        print("SCRATCH roots flipped below=\(c.host.below.root.isGeometryFlipped) sel=\(c.host.selectionHost.root.isGeometryFlipped)")
+        c.host.below.root.render(in: ctx)
+        c.host.selectionHost.root.render(in: ctx)
         return (try #require(ctx.makeImage()), picked)
     }
 
-    @Test func lightAndDark() throws {
-        let (light, l) = try render(dark: false)
-        let (dark, d) = try render(dark: true)
+    @Test func lightAndDark() async throws {
+        let (light, l) = try await render(dark: false)
+        let (dark, d) = try await render(dark: true)
         print("SCRATCH selected light: \(l.debugDescription) dark: \(d.debugDescription)")
         let w = light.width + dark.width, h = max(light.height, dark.height)
         let ctx = try #require(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
