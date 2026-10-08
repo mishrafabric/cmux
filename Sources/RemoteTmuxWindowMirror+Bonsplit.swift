@@ -17,6 +17,11 @@ extension RemoteTmuxWindowMirror {
         bonsplitController.delegate = self
         bonsplitController.tabShortcutHintsEnabled = false
         bonsplitController.onExternalTabDrop = { _ in false }
+        bonsplitController.onTabZoomToggleRequest = { [weak self] tabID, _ in
+            guard let self,
+                  let tmuxPaneID = self.paneIdByTabId[tabID] else { return false }
+            return self.requestTogglePaneZoom(tmuxPaneID)
+        }
     }
 
     func reconcileBonsplitTree(
