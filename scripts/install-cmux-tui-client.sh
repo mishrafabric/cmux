@@ -57,6 +57,15 @@ while (( $# )); do
   esac
   shift
 done
+# This fork consumes the official upstream client artifacts. The inherited
+# build workflow passes its own repository as signer; retain provenance
+# verification against the workflow that actually published these manifests.
+if [[ "${GITHUB_REPOSITORY:-}" == "mishrafabric/cmux" \
+      && "$ATTEST_SIGNER_WORKFLOW" == "mishrafabric/cmux/.github/workflows/cmux-tui-artifacts.yml" \
+      && "$MANIFEST_URL" == https://files.cmux.com/cmux-tui/* ]]; then
+  ATTEST_SIGNER_WORKFLOW="manaflow-ai/cmux/.github/workflows/cmux-tui-artifacts.yml"
+fi
+
 # uname reports the process architecture under Rosetta. Prefer the Apple
 # Silicon hardware capability, matching build-ghostty-cli-helper.sh.
 if [[ "$ARCH" == native ]]; then
