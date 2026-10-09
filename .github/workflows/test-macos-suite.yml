@@ -1,4 +1,17 @@
-name: Run tests on Depot
+# A whole macOS test target, compiled cold on the repository's pool.
+#
+# For one test, or a few, use `./scripts/run-e2e.sh <selector> --ref <sha>`
+# instead. It runs the same app-host tests through test-e2e.yml, reuses a run
+# already in flight at that commit, refuses a selector that already failed
+# there, and batches several selectors against one compile. This workflow does
+# none of that. A dispatch that names unit selectors and skips UI tests is
+# therefore handed to that wrapper by the `focused` job, which links the
+# test-e2e run and fails so that nobody reads this run as the test's result.
+name: Run macOS test suite
+run-name: >-
+  macOS tests @ ${{ inputs.ref || github.ref_name }} ·
+  unit=${{ inputs.skip_unit_tests && 'off' || inputs.unit_test_suites || 'all' }} ·
+  UI=${{ inputs.skip_ui_tests && 'off' || inputs.test_filter || 'all' }}
 
 on:
   workflow_call:
@@ -24,7 +37,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch or SHA to test
+        description: Branch, tag, full SHA, or short SHA to test
         required: false
         default: ""
       skip_unit_tests:
@@ -38,7 +51,7 @@ on:
         default: false
         type: boolean
       unit_test_suites:
-        description: "Comma-separated unit suites; empty runs the full unit target"
+        description: "Comma-separated unit suites; empty runs the full unit target. With UI tests skipped, these run through ./scripts/run-e2e.sh instead of a cold build here"
         required: false
         default: ""
       test_filter:
@@ -51,10 +64,83 @@ on:
         default: "120"
 
 jobs:
+  resolve-ref:
+    uses: ./.github/workflows/resolve-dispatch-ref.yml
+    with:
+      ref: ${{ inputs.ref }}
+
+  focused:
+    # Selectors with UI tests off are a focused run. Compiled here, each one
+    # paid a cold build of the whole app, about 20 minutes, for one test.
+    # The wrapper dispatches to manaflow-ai/cmux, so a fork keeps its own
+    # `tests` job.
+    if: ${{ github.repository == 'manaflow-ai/cmux' && github.event_name == 'workflow_dispatch' && inputs.unit_test_suites != '' && inputs.skip_ui_tests && !inputs.skip_unit_tests }}
+    runs-on: ${{ github.repository_owner != 'manaflow-ai' && 'ubuntu-24.04' || vars.LINUX_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run the selectors through run-e2e.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The job token cannot list repository variables, and without the
+          # runner the wrapper cannot see an identical run already in flight.
+          CMUX_MACOS_RUNNER_TESTS: ${{ vars.MACOS_RUNNER_TESTS }}
+          CMUX_CI_E2E_LARGE_POOL_OVERFLOW: ${{ vars.CI_E2E_LARGE_POOL_OVERFLOW }}
+          CMUX_CI_PR_POOL_ORDER: ${{ vars.CI_PR_POOL_ORDER }}
+          CMUX_CI_PR_POOL_MAX_QUEUED: ${{ vars.CI_PR_POOL_MAX_QUEUED }}
+          CMUX_CI_PR_POOL_QUEUE_ROUNDS: ${{ vars.CI_PR_POOL_QUEUE_ROUNDS }}
+          UNIT_TEST_SUITES: ${{ inputs.unit_test_suites }}
+          TEST_REF: ${{ inputs.ref || github.sha }}
+          TEST_TIMEOUT: ${{ inputs.test_timeout }}
+        run: |
+          set -euo pipefail
+          selectors=()
+          IFS=',' read -r -a suites <<< "$UNIT_TEST_SUITES"
+          for suite in "${suites[@]}"; do
+            suite="${suite// /}"
+            # The suite path ran a repeated entry twice; the wrapper refuses one.
+            [ -n "$suite" ] && [[ " ${selectors[*]} " != *" cmuxTests/$suite "* ]] && selectors+=("cmuxTests/$suite")
+          done
+          ./scripts/run-e2e.sh "${selectors[@]}" --ref "$TEST_REF" --timeout "$TEST_TIMEOUT" | tee dispatch.log
+          url="$(grep -oE 'https://github.com/[^ ]+/actions/runs/[0-9]+' dispatch.log | tail -1)"
+          echo "Forwarded to $url" >> "$GITHUB_STEP_SUMMARY"
+          # Exit red: this run did not test anything, and a green one would
+          # read as a pass.
+          echo "::error title=Forwarded, not tested::The result is in $url"
+          exit 1
+
   tests:
-    runs-on: ${{ vars.MACOS_RUNNER_15 || 'blacksmith-6vcpu-macos-15' }}
+    needs: resolve-ref
+    if: ${{ !(github.repository == 'manaflow-ai/cmux' && github.event_name == 'workflow_dispatch' && inputs.unit_test_suites != '' && inputs.skip_ui_tests && !inputs.skip_unit_tests) }}
+    # Keep this lane on the repository's normal macOS runner and do not
+    # expose a provider override.
+    runs-on: ${{ github.repository_owner != 'manaflow-ai' && 'macos-26' || vars.MACOS_RUNNER_TESTS || 'blacksmith-6vcpu-macos-15' }}
     timeout-minutes: ${{ inputs.unit_test_suites != '' && 35 || 20 }}
     steps:
+      - name: Verify GitHub-hosted route
+        env:
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          REQUESTED_RUNNER: ${{ github.repository_owner != 'manaflow-ai' && 'macos-26' || vars.MACOS_RUNNER_TESTS || 'blacksmith-6vcpu-macos-15' }}
+          RUNNER_CONTEXT_NAME: ${{ runner.name }}
+        run: |
+          # The self-hosted fleet also carries a macos-26 label, so a macos-*
+          # request must prove it landed on GitHub-hosted capacity before any
+          # checkout.
+          case "$REQUESTED_RUNNER" in
+            macos-*)
+              if [ "$RUNNER_ENVIRONMENT" != "github-hosted" ]; then
+                echo "::error::$REQUESTED_RUNNER resolved outside GitHub-hosted capacity: $RUNNER_CONTEXT_NAME"
+                exit 1
+              fi
+              ;;
+          esac
       - name: Clear stale git locks (self-hosted reused workspace)
         shell: bash
         run: |
@@ -70,7 +156,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ needs.resolve-ref.outputs.sha }}
           submodules: recursive
 
       - name: Select Xcode
@@ -125,19 +211,46 @@ jobs:
         run: |
           rm -rf ~/Library/Developer/Xcode/DerivedData/cmux-*
 
+      - name: Prepare clean package cache directory
+        run: |
+          rm -rf "$GITHUB_WORKSPACE/.ci-source-packages"
+          mkdir -p "$GITHUB_WORKSPACE/.ci-source-packages"
+
+      - name: Restore Swift packages
+        continue-on-error: true
+        env:
+          CI_CACHE_R2_PUBLIC_URL: ${{ vars.CI_CACHE_R2_PUBLIC_URL || 'https://ci-cache.cmux.com' }}
+        uses: ./.github/actions/cache-restore
+        with:
+          backend: ${{ vars.CI_CACHE_BACKEND || 'r2' }}
+          path: .ci-source-packages
+          # Consume the Swift package seed nightly.yml saves, without
+          # publishing caches from a manually selected revision. Test products
+          # remain fresh.
+          key: spm-${{ hashFiles('cmux.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'scripts/ci/swiftpm-cache-layout') }}
+          restore-keys: spm-
+
+      - name: Sanitize Swift package cache
+        run: python3 scripts/ci/sanitize-xcode-source-packages-cache.py .ci-source-packages
+
       - name: Resolve Swift packages
         run: |
           set -euo pipefail
           SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
-          rm -rf "$SOURCE_PACKAGES_DIR"
           mkdir -p "$SOURCE_PACKAGES_DIR"
 
           for attempt in 1 2 3; do
             if xcodebuild -project cmux.xcodeproj -scheme cmux-unit -configuration Debug \
               -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
               -resolvePackageDependencies; then
-              exit 0
+              if [ -d "$SOURCE_PACKAGES_DIR/artifacts/sparkle/Sparkle/Sparkle.xcframework" ] \
+                && [ -d "$SOURCE_PACKAGES_DIR/artifacts/sentry-cocoa/Sentry/Sentry.xcframework" ]; then
+                exit 0
+              fi
+              echo "Resolve succeeded without required binary artifacts; retrying cleanly" >&2
             fi
+            rm -rf "$SOURCE_PACKAGES_DIR"
+            mkdir -p "$SOURCE_PACKAGES_DIR"
             if [ "$attempt" -eq 3 ]; then
               echo "Failed to resolve Swift packages after 3 attempts" >&2
               exit 1
@@ -200,12 +313,18 @@ jobs:
             IFS=',' read -r -a suites <<< "$UNIT_TEST_SUITES"
             local failed=0
             for suite in "${suites[@]}"; do
-              if [[ ! "$suite" =~ ^[A-Za-z0-9_]+$ ]]; then
+              # A suite, or one test in it: `Suite/testName` for XCTest,
+              # `Suite/testName()` for Swift Testing. Without the parens a
+              # Swift Testing selector matches nothing, and the positive-summary
+              # check below fails the run rather than reporting a pass.
+              if [[ ! "$suite" =~ ^[A-Za-z0-9_]+(/[A-Za-z0-9_]+(\(\))?)?$ ]]; then
                 echo "Invalid unit suite identifier" >&2
                 return 1
               fi
               local suite_status=0
-              local output_path="$TEST_RESULTS_ROOT/$suite.log"
+              local log_name="${suite//\//.}"
+              log_name="${log_name%()}"
+              local output_path="$TEST_RESULTS_ROOT/$log_name.log"
               set +e
               run_unit_suite "$output_path" "-only-testing:cmuxTests/$suite"
               suite_status=$?
@@ -281,12 +400,25 @@ jobs:
             ONLY_TESTING="-only-testing:cmuxUITests"
           fi
 
+          UI_TEST_LOG="$RUNNER_TEMP/cmux-ui-tests.log"
+          set +e
           xcodebuild -project cmux.xcodeproj -scheme cmux -configuration Debug \
             -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
             -disableAutomaticPackageResolution \
             -destination "platform=macOS" \
             -maximum-test-execution-time-allowance "$TEST_TIMEOUT" \
-            "$ONLY_TESTING" test
+            "$ONLY_TESTING" test 2>&1 | tee "$UI_TEST_LOG"
+          UI_TEST_STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$UI_TEST_STATUS" -ne 0 ]; then
+            exit "$UI_TEST_STATUS"
+          fi
+          # A filter that matches nothing exits 0 after executing zero tests.
+          if [ -n "$TEST_FILTER" ] && ! scripts/ci/require_selected_test_execution.sh \
+            "$UI_TEST_LOG" "cmuxUITests/$TEST_FILTER" >/dev/null; then
+            echo "::error::test_filter cmuxUITests/$TEST_FILTER executed zero tests; check the class and method names"
+            exit 1
+          fi
 
       - name: Upload unit test results
         if: ${{ always() && !inputs.skip_unit_tests }}
