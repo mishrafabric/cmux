@@ -28,7 +28,7 @@ import e2e_runner_pool as pool  # noqa: E402
 import machine_failure  # noqa: E402
 from e2e_runner_pool import SMALL_RUNNER  # noqa: E402
 
-REPO = "manaflow-ai/cmux"
+REPO = "mishrafabric/cmux"
 WORKFLOW = "test-e2e.yml"
 # Runs cmuxTests against app-host products a CI run already compiled; see
 # reuse_ci_products().
